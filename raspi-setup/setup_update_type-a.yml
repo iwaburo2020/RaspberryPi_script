@@ -1,0 +1,8 @@
+---
+- name: setup_update_type-a
+  hosts: all
+  roles:
+    - update
+  post_tasks:
+    - name: 再起動
+      ansible.builtin.reboot:

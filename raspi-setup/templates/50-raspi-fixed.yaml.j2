@@ -1,0 +1,27 @@
+# ------------------------------------------------------------
+# 50-raspi-fixed.yaml
+# NICをMACアドレスで固定するNetplan設定
+# ------------------------------------------------------------
+network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+{% for nic in netconf_nics %}
+{% if nic.addr and nic.mac %}
+
+    {{ nic.name }}:
+      match:
+        macaddress: {{ nic.mac }}
+      set-name: {{ nic.name }}
+      dhcp4: false
+      addresses:
+        - {{ nic.addr }}
+{% if nic.gateway %}
+      routes:
+        - to: default
+          via: {{ nic.gateway }}
+{% endif %}
+      nameservers:
+        addresses: [{{ nic.dns | join(', ') }}]
+{% endif %}
+{% endfor %}

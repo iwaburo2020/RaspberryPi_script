@@ -1,0 +1,116 @@
+---
+# setup_type-a.sh / setup_type-b.sh 共通のネットワーク設定部分
+
+- name: netconf.env 取得
+  ansible.builtin.get_url:
+    url: "{{ config_base_url }}/{{ inventory_hostname }}/netconf.env"
+    dest: "{{ home_pi }}/netconf.env"
+    owner: pi
+    group: pi
+    mode: "0644"
+    force: true
+
+- name: netconf.env 読み込み
+  ansible.builtin.slurp:
+    src: "{{ home_pi }}/netconf.env"
+  register: netconf_raw
+
+- name: netconf.env 変数展開
+  ansible.builtin.set_fact:
+    netconf: "{{ dict(netconf_raw.content | b64decode | regex_findall('(?m)^([A-Za-z0-9_]+)=\"?([^\"\\n]*)\"?[ \\t]*$')) }}"
+
+- name: netconf.env の値を設定
+  ansible.builtin.set_fact:
+    netconf_hostname: "{{ netconf.HOSTNAME | default('') }}"
+    no_reboot: "{{ netconf.NO_REBOOT | default('false') }}"
+    netconf_nics:
+      - name: eth0
+        mac: "{{ netconf.ETH0_MAC | default('') }}"
+        addr: "{{ netconf.ETH0_IPV4_ADDR | default('') }}"
+        gateway: "{{ netconf.ETH0_GATEWAY | default('') }}"
+        dns: "{{ (netconf.ETH0_DNS | default('')).split(',') }}"
+      - name: eth1
+        mac: "{{ netconf.ETH1_MAC | default('') }}"
+        addr: "{{ netconf.ETH1_IPV4_ADDR | default('') }}"
+        gateway: "{{ netconf.ETH1_GATEWAY | default('') }}"
+        dns: "{{ (netconf.ETH1_DNS | default('')).split(',') }}"
+
+- name: IPv6無効化(sysctl)
+  ansible.builtin.get_url:
+    url: "{{ config_base_url }}/99-disable-ipv6.conf"
+    dest: /etc/sysctl.d/99-disable-ipv6.conf
+    force: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: cmdline.txt 退避(初回のみ)
+  ansible.builtin.command: cp -p {{ boot_dir }}/cmdline.txt {{ boot_dir }}/cmdline.txt.org
+  args:
+    creates: "{{ boot_dir }}/cmdline.txt.org"
+
+- name: cmdline.txt に ipv6.disable=1 追記(未追記の場合のみ)
+  ansible.builtin.replace:
+    path: "{{ boot_dir }}/cmdline.txt"
+    regexp: '^((?!.*\bipv6\.disable=1\b).*\S)[ \t]*$'
+    replace: '\1 ipv6.disable=1'
+
+- name: OS標準のNetplan設定検索
+  ansible.builtin.find:
+    paths: /etc/netplan
+    patterns: "*.yaml"
+    excludes: "50-raspi-fixed.yaml"
+  register: netplan_std
+
+- name: OS標準のNetplan設定を退避(削除はしない)
+  ansible.builtin.command: mv "{{ item.path }}" "{{ item.path }}.org"
+  loop: "{{ netplan_std.files }}"
+
+- name: Netplan設定ファイル生成
+  ansible.builtin.template:
+    src: "{{ playbook_dir }}/templates/50-raspi-fixed.yaml.j2"
+    dest: /etc/netplan/50-raspi-fixed.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: ホスト名設定
+  when: netconf_hostname | length > 0
+  ansible.builtin.hostname:
+    name: "{{ netconf_hostname }}"
+    use: systemd
+
+- name: 構築後のIPアドレス一覧作成
+  ansible.builtin.set_fact:
+    netconf_new_ips: "{{ netconf_nics | selectattr('addr') | selectattr('mac') | map(attribute='addr') | map('regex_replace', '/.*$', '') | list }}"
+
+- name: 接続先IPアドレスが構築後も変わらない場合
+  when: (ansible_host | default(inventory_hostname)) in netconf_new_ips
+  block:
+    - name: Netplan適用
+      ansible.builtin.command: netplan apply
+      async: 60
+      poll: 0
+
+    - name: Netplan適用後の接続待ち
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 120
+
+- name: 接続先IPアドレスが構築後に変わる場合(接続が切れるため応答を待たない)
+  when: (ansible_host | default(inventory_hostname)) not in netconf_new_ips
+  block:
+    - name: 再起動
+      ansible.builtin.shell: sleep 5 && /sbin/shutdown -r now
+      async: 1
+      poll: 0
+      when: (setup_reboot | default(false) | bool) and not (no_reboot | bool)
+
+    - name: Netplan適用
+      ansible.builtin.shell: sleep 5 && netplan apply
+      async: 60
+      poll: 0
+      when: not ((setup_reboot | default(false) | bool) and not (no_reboot | bool))
+
+    - name: 以降の処理を終了
+      ansible.builtin.meta: end_host

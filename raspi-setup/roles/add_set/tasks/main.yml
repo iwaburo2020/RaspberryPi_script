@@ -1,0 +1,77 @@
+---
+# setup_add_set.sh 相当
+
+- name: hwclock 設定
+  when: hwclock_sync_enabled | bool
+  block:
+    - name: hwclock_sync.service 退避(既存ファイルがある場合・初回のみ)
+      ansible.builtin.command: cp -p /etc/systemd/system/hwclock_sync.service /etc/systemd/system/hwclock_sync.service.org
+      args:
+        creates: /etc/systemd/system/hwclock_sync.service.org
+        removes: /etc/systemd/system/hwclock_sync.service
+
+    - name: hwclock_sync.service 配置
+      ansible.builtin.get_url:
+        url: "{{ config_base_url }}/hwclock_sync.service.sh"
+        dest: /etc/systemd/system/hwclock_sync.service
+        force: true
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: hwclock_sync_rtc0.sh 配置
+      ansible.builtin.get_url:
+        url: "{{ config_base_url }}/{{ inventory_hostname }}/hwclock_sync_rtc0.sh"
+        dest: /home/script/hwclock_sync_rtc0.sh
+        force: true
+        owner: root
+        group: root
+        mode: "0755"
+
+- name: chk_mnt.sh コピー
+  ansible.builtin.copy:
+    src: /usr/local/script/chk_mnt.sh
+    dest: /home/script/chk_mnt.sh
+    remote_src: true
+    owner: root
+    group: root
+    mode: preserve
+  when: copy_chk_mnt | bool
+
+- name: rc.local 配置
+  ansible.builtin.get_url:
+    url: "{{ config_base_url }}/{{ inventory_hostname }}/rc.local.sh"
+    dest: /etc/rc.local
+    force: true
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: hwclock_sync.service 有効化
+  ansible.builtin.systemd_service:
+    name: hwclock_sync.service
+    enabled: true
+    daemon_reload: true
+  when: hwclock_sync_enabled | bool
+
+- name: systemd-timesyncd 無効化
+  ansible.builtin.systemd_service:
+    name: systemd-timesyncd
+    enabled: false
+  when: time_sync == "timesyncd"
+
+- name: chrony 無効化(rc.local から起動するため)
+  ansible.builtin.systemd_service:
+    name: chrony.service
+    enabled: false
+  when: time_sync == "chrony"
+
+- name: rsyslog 有効化
+  ansible.builtin.systemd_service:
+    name: rsyslog.service
+    enabled: true
+
+- name: rc-local 有効化
+  ansible.builtin.systemd_service:
+    name: rc-local.service
+    enabled: true

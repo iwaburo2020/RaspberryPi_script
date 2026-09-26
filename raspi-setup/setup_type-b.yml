@@ -1,0 +1,7 @@
+---
+- name: setup_type-b
+  hosts: all
+  vars:
+    setup_reboot: false
+  roles:
+    - network

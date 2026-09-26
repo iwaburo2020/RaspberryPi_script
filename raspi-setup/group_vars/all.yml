@@ -1,0 +1,52 @@
+---
+# ---- 配布サーバー(wget 取得元) ----
+config_base_url: "http://192.168.200.15/config"
+home_pi: /home/pi
+
+# ---- setup_type-a.sh 相当 ----
+boot_dir: /boot/firmware
+
+# apt.conf 取得元(共通)
+apt_conf_url: "{{ config_base_url }}/apt.conf"
+
+# config.txt 追記内容(setup_type-a.sh の有効行)
+config_txt_block: |
+  # Wi-Fi disable
+  dtoverlay=pi3-disable-wifi
+
+  # Bluetooth disable
+  dtoverlay=pi3-disable-bt
+
+  # turn power LED into heartbeat
+  dtparam=act_led_trigger=heartbeat
+
+
+  # PoE HAT Fan Control
+  dtoverlay=rpi-poe
+  dtparam=poe_fan_temp0=50000,poe_fan_temp0_hyst=5000
+  dtparam=poe_fan_temp1=60000,poe_fan_temp1_hyst=5000
+  dtparam=poe_fan_temp1=70000,poe_fan_temp1_hyst=5000
+  dtparam=poe_fan_temp1=80000,poe_fan_temp1_hyst=5000
+
+# fstab 追記行
+nfs_script_fstab_line: "192.168.200.7:/nfs/script /nfs/script nfs tcp,vers=4,rw,noatime,_netdev 0 0"
+
+# ---- setup_update_type-a.sh 相当 ----
+update_packages:
+  - dnsutils
+  - ntpsec-ntpdate
+  - rsyslog
+  - nfs-common
+  - util-linux-extra
+  - apache2
+
+# 時刻同期方式(timesyncd / chrony)
+time_sync: timesyncd
+
+# RTCモジュール使用
+rtc_enabled: false
+rtc_overlay_line: "dtoverlay=i2c-rtc,ds3231"
+
+# ---- setup_add_set.sh 相当 ----
+hwclock_sync_enabled: false
+copy_chk_mnt: false

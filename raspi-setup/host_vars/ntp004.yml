@@ -1,0 +1,42 @@
+---
+# Raspberry Pi 3B+ + 公式PoE HAT、MicroSD起動
+ansible_host: 192.168.200.14
+
+# apt.conf 取得元(VLAN200のみのため ntp004 用)
+apt_conf_url: "{{ config_base_url }}/{{ inventory_hostname }}/apt.conf"
+
+# config.txt 追記内容(MicroSD パフォーマンス設定:Raspberry Pi 3 用を追加)
+config_txt_block: |
+  dtoverlay=sdtweak,overclock_50=100
+
+  # Wi-Fi disable
+  dtoverlay=pi3-disable-wifi
+
+  # Bluetooth disable
+  dtoverlay=pi3-disable-bt
+
+  # turn power LED into heartbeat
+  dtparam=act_led_trigger=heartbeat
+
+
+  # PoE HAT Fan Control
+  dtoverlay=rpi-poe
+  dtparam=poe_fan_temp0=50000,poe_fan_temp0_hyst=5000
+  dtparam=poe_fan_temp1=60000,poe_fan_temp1_hyst=5000
+  dtparam=poe_fan_temp1=70000,poe_fan_temp1_hyst=5000
+  dtparam=poe_fan_temp1=80000,poe_fan_temp1_hyst=5000
+
+update_packages:
+  - dnsutils
+  - ntpsec-ntpdate
+  - rsyslog
+  - nfs-common
+  - util-linux-extra
+  - i2c-tools
+  - apache2
+  - chrony
+
+time_sync: chrony
+rtc_enabled: true
+hwclock_sync_enabled: true
+copy_chk_mnt: true

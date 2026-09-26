@@ -1,0 +1,156 @@
+---
+# setup_update_type-a.sh 相当
+
+- name: 99force-ipv4 存在確認
+  ansible.builtin.stat:
+    path: /etc/apt/apt.conf.d/99force-ipv4
+  register: ipv4_flag
+
+- name: パッケージ更新・導入
+  when: ipv4_flag.stat.exists
+  block:
+    - name: apt update / full-upgrade
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+
+    - name: autoremove / autoclean
+      ansible.builtin.apt:
+        autoremove: true
+        autoclean: true
+
+    - name: パッケージ導入
+      ansible.builtin.apt:
+        name: "{{ update_packages }}"
+        state: present
+
+    - name: autoremove / autoclean(導入後)
+      ansible.builtin.apt:
+        autoremove: true
+        autoclean: true
+
+- name: RTCモジュール設定
+  when: rtc_enabled | bool
+  block:
+    - name: /etc/modules 退避(初回のみ)
+      ansible.builtin.command: cp -p /etc/modules /etc/modules.org
+      args:
+        creates: /etc/modules.org
+
+    - name: I2C 有効化状態確認
+      ansible.builtin.command: raspi-config nonint get_i2c
+      register: i2c_chk
+      changed_when: false
+
+    - name: I2C 有効化
+      ansible.builtin.command: raspi-config nonint do_i2c 0
+      when: i2c_chk.stdout != "0"
+
+    - name: config.txt に RTC オーバーレイ追記
+      ansible.builtin.lineinfile:
+        path: "{{ boot_dir }}/config.txt"
+        line: "{{ rtc_overlay_line }}"
+
+    - name: /etc/modules に i2c-dev 追記(未記載の場合のみ)
+      ansible.builtin.lineinfile:
+        path: /etc/modules
+        regexp: '^i2c[-_]dev'
+        line: i2c-dev
+
+- name: chrony 設定
+  when: time_sync == "chrony"
+  block:
+    - name: chrony.conf 退避(初回のみ)
+      ansible.builtin.command: cp -p /etc/chrony/chrony.conf /etc/chrony/chrony.conf.org
+      args:
+        creates: /etc/chrony/chrony.conf.org
+
+    - name: chrony.conf 配置
+      ansible.builtin.get_url:
+        url: "{{ config_base_url }}/{{ inventory_hostname }}/chrony.conf"
+        dest: /etc/chrony/chrony.conf
+        force: true
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: /etc/default/chrony 退避(初回のみ)
+      ansible.builtin.command: cp -p /etc/default/chrony /etc/default/chrony.org
+      args:
+        creates: /etc/default/chrony.org
+
+    - name: chronyd IPv4固定(OS既定のオプションは維持して -4 を追加)
+      ansible.builtin.replace:
+        path: /etc/default/chrony
+        regexp: '^DAEMON_OPTS="(?!-4[ "])(.*)"$'
+        replace: 'DAEMON_OPTS="-4 \1"'
+
+- name: timesyncd 設定
+  when: time_sync == "timesyncd"
+  block:
+    - name: timesyncd.conf 退避(初回のみ)
+      ansible.builtin.command: cp -p /etc/systemd/timesyncd.conf /etc/systemd/timesyncd.conf.org
+      args:
+        creates: /etc/systemd/timesyncd.conf.org
+
+    - name: timesyncd.conf 取得
+      ansible.builtin.get_url:
+        url: "{{ config_base_url }}/timesyncd.conf"
+        dest: "{{ home_pi }}/timesyncd.conf"
+        owner: pi
+        group: pi
+        mode: "0644"
+        force: true
+
+    - name: timesyncd.conf 読み込み
+      ansible.builtin.slurp:
+        src: "{{ home_pi }}/timesyncd.conf"
+      register: timesyncd_raw
+
+    - name: timesyncd.conf 追記
+      ansible.builtin.blockinfile:
+        path: /etc/systemd/timesyncd.conf
+        marker: "# {mark} timesyncd.conf append"
+        block: "{{ timesyncd_raw.content | b64decode | trim }}"
+
+- name: rsyslog.conf 退避(初回のみ)
+  ansible.builtin.command: cp -p /etc/rsyslog.conf /etc/rsyslog.conf.org
+  args:
+    creates: /etc/rsyslog.conf.org
+
+- name: rsyslog.conf 配置
+  ansible.builtin.get_url:
+    url: "{{ config_base_url }}/rsyslog.conf"
+    dest: /etc/rsyslog.conf
+    force: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: rsyslog 無効化
+  ansible.builtin.systemd_service:
+    name: rsyslog.service
+    enabled: false
+
+- name: パッケージアップデート用ログローテート設定
+  ansible.builtin.get_url:
+    url: "{{ config_base_url }}/upgradable_list.conf"
+    dest: /etc/logrotate.d/upgradable_list
+    force: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: logrotate rsyslog 退避(初回のみ)
+  ansible.builtin.command: mv /etc/logrotate.d/rsyslog /etc/logrotate.d/rsyslog.org
+  args:
+    creates: /etc/logrotate.d/rsyslog.org
+
+- name: シスログ用ログローテート設定
+  ansible.builtin.get_url:
+    url: "{{ config_base_url }}/logrotate_rsyslog.conf"
+    dest: /etc/logrotate.d/rsyslog
+    force: true
+    owner: root
+    group: root
+    mode: "0644"

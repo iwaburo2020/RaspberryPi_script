@@ -1,0 +1,12 @@
+---
+- name: setup_type-a
+  hosts: all
+  vars:
+    setup_reboot: true
+  roles:
+    - base
+    - network
+  post_tasks:
+    - name: 再起動
+      ansible.builtin.reboot:
+      when: not (no_reboot | bool)
